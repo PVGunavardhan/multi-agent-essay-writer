@@ -39,7 +39,42 @@ if DATABASE_URL:
     # Fix postgres:// to postgresql:// if needed (some platforms use old format)
     if DATABASE_URL.startswith('postgres://'):
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-    server.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+    
+    print(f"Using PostgreSQL database at {DATABASE_URL}...")
+    # Parse URL to remove unsupported query parameters
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    parsed = urlparse(DATABASE_URL)
+    
+    # Extract and filter query parameters - keep only those supported by psycopg2
+    query_params = parse_qs(parsed.query)
+    supported_params = {}
+    
+    # Common supported parameters
+    supported_keys = ['sslmode', 'connect_timeout', 'application_name', 'options']
+    for key in supported_keys:
+        if key in query_params:
+            supported_params[key] = query_params[key]
+    
+    # Reconstruct URL with only supported parameters
+    new_query = urlencode(supported_params, doseq=True) if supported_params else ''
+    cleaned_url = urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        new_query,
+        parsed.fragment
+    ))
+    
+    server.config['SQLALCHEMY_DATABASE_URI'] = cleaned_url
+    # Add connection arguments for better Supabase compatibility
+    server.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 300,
+        'connect_args': {
+            'sslmode': 'require'
+        }
+    }
 else:
     # Local development with SQLite
     server.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///essay_writer.db'
@@ -146,7 +181,16 @@ session_lock = threading.Lock()
 
 # Create tables
 with server.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+        print("✅ Database tables created successfully!")
+    except Exception as e:
+        print(f"❌ Database initialization error: {str(e)}")
+        print(f"Database URL (redacted): {server.config.get('SQLALCHEMY_DATABASE_URI', 'Not set')[:50]}...")
+        # In production, we want to see the error but not crash
+        if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+            print("⚠️ Running in serverless environment - database might not be accessible yet")
+        raise
 
 def is_authenticated():
     """Check if user is authenticated using multiple methods"""
