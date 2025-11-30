@@ -31,7 +31,19 @@ load_dotenv()
 # Initialize Flask server
 server = Flask(__name__)
 server.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "super-secret-key-for-development-only")
-server.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///essay_writer.db'
+
+# Database configuration - Use Supabase PostgreSQL in production, SQLite locally
+DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('POSTGRES_URL')
+if DATABASE_URL:
+    # Supabase/PostgreSQL connection
+    # Fix postgres:// to postgresql:// if needed (some platforms use old format)
+    if DATABASE_URL.startswith('postgres://'):
+        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    server.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+else:
+    # Local development with SQLite
+    server.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///essay_writer.db'
+
 server.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Session configuration - Initially allow insecure for testing
